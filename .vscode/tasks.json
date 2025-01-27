@@ -1,0 +1,13 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build HEX",
+            "type": "shell",
+            "command": "cargo objcopy --release -- -O ihex target/teensy-micro-mod.hex",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            }
+        }
+    ]
+}
