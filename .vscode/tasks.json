@@ -8,6 +8,14 @@
             "options": {
                 "cwd": "${workspaceFolder}"
             }
+        },
+        {
+            "label": "Deploy HEX",
+            "type": "shell",
+            "command": "teensy_loader_cli --mcu=TEENSY_MICROMOD -w target/teensy-micro-mod.hex",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            }
         }
     ]
 }
