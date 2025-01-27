@@ -19,7 +19,13 @@ features = [
     # Use the BSP's runtime.
     "rt",
 ]
+[dev-dependencies]
+embedded-hal-mock = "0.9"
 
+[features]
+default = []
+test-utilities = []
+testing = []
 # Don't optimize build dependencies, like proc macros.
 # Helps with build times.
 [profile.release.build-override]

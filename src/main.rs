@@ -1,15 +1,9 @@
-//! The starter code slowly blinks the LED and sets up
-//! USB logging. It periodically logs messages over USB.
-//!
-//! Despite targeting the Teensy 4.0, this starter code
-//! should also work on the Teensy 4.1 and Teensy MicroMod.
-//! You should eventually target your board! See inline notes.
-//!
-//! This template uses [RTIC v2](https://rtic.rs/2/book/en/)
-//! for structuring the application.
+#![cfg_attr(not(test), no_std)]
+#![cfg_attr(not(test), no_main)]
 
-#![no_std]
-#![no_main]
+#[cfg(test)]
+
+extern crate std;
 
 use teensy4_panic as _;
 
@@ -37,6 +31,18 @@ mod app {
         led: board::Led,
         /// A poller to control USB logging.
         poller: logging::Poller,
+    }
+    
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn test_basic() {
+            assert!(true);
+        }
+    
+            // Add more test functions here that don't depend on hardware
     }
 
     #[init]
@@ -66,7 +72,7 @@ mod app {
         let mut count = 0u32;
         loop {
             cx.local.led.toggle();
-            Systick::delay(500.millis()).await;
+            Systick::delay(1000.millis()).await;
 
             log::info!("Hello from your Teensy 4! The count is {count}");
             if count % 7 == 0 {
