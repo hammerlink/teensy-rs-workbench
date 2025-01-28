@@ -1,0 +1,36 @@
+USB audio test
+Manufacturer: Hammernet
+Serial Number: 42
+Speed: 480Mb/s (high)
+Bus:   1
+Address: 126
+USB Version:  2.10
+Device Class: ef
+Device Subclass: 02
+Device Protocol: 01
+Maximum Default Endpoint Size: 64
+Number of Configurations: 1
+Vendor Id: 16c0
+Product Id: 27dd
+Revision Number: 00.10
+
+Config Number: 1
+	Number of Interfaces: 2
+	Attributes: 80
+	MaxPower Needed: 100mA
+
+	Interface Number: 0
+		Name: (none)
+		Alternate Number: 0
+		Class: 01
+		Sub Class: 01
+		Protocol: 00
+		Number of Endpoints: 0
+
+	Interface Number: 1
+		Name: (none)
+		Alternate Number: 0
+		Class: 01
+		Sub Class: 02
+		Protocol: 00
+		Number of Endpoints: 0

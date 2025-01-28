@@ -1,0 +1,66 @@
+Teensy Audio
+Manufacturer: Teensyduino
+Serial Number: 16199960
+Speed: 480Mb/s (high)
+Bus:   5
+Address:   3
+USB Version:  2.00
+Device Class: 00
+Device Subclass: 00
+Device Protocol: 00
+Maximum Default Endpoint Size: 64
+Number of Configurations: 1
+Vendor Id: 16c0
+Product Id: 04d2
+Revision Number: 02.81
+
+Config Number: 1
+	Number of Interfaces: 4
+	Attributes: c0
+	MaxPower Needed: 100mA
+
+	Interface Number: 0
+		Name: usbhid
+		Alternate Number: 0
+		Class: 03
+		Sub Class: 00
+		Protocol: 00
+		Number of Endpoints: 2
+
+			Endpoint Address: 02
+			Direction: out
+			Attribute: 3
+			Type: Interrupt
+			Max Packet Size: 32
+			Interval: 250us
+
+			Endpoint Address: 82
+			Direction: in
+			Attribute: 3
+			Type: Interrupt
+			Max Packet Size: 64
+			Interval: 125us
+
+	Interface Number: 1
+		Name: (none)
+		Alternate Number: 0
+		Class: 01
+		Sub Class: 01
+		Protocol: 00
+		Number of Endpoints: 0
+
+	Interface Number: 2
+		Name: (none)
+		Alternate Number: 0
+		Class: 01
+		Sub Class: 02
+		Protocol: 00
+		Number of Endpoints: 0
+
+	Interface Number: 3
+		Name: (none)
+		Alternate Number: 0
+		Class: 01
+		Sub Class: 02
+		Protocol: 00
+		Number of Endpoints: 0
