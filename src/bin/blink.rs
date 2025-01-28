@@ -2,7 +2,6 @@
 #![cfg_attr(not(test), no_main)]
 
 #[cfg(test)]
-
 extern crate std;
 
 use teensy4_panic as _;
@@ -32,7 +31,7 @@ mod app {
         /// A poller to control USB logging.
         poller: logging::Poller,
     }
-    
+
     #[cfg(test)]
     mod tests {
         use super::*;
@@ -41,8 +40,8 @@ mod app {
         fn test_basic() {
             assert!(true);
         }
-    
-            // Add more test functions here that don't depend on hardware
+
+        // Add more test functions here that don't depend on hardware
     }
 
     #[init]

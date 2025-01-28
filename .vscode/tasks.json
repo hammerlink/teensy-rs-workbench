@@ -2,9 +2,17 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Build HEX",
+            "label": "Build HEX - BLINK",
             "type": "shell",
-            "command": "cargo objcopy --release -- -O ihex target/teensy-micro-mod.hex",
+            "command": "cargo objcopy --bin blink --release -- -O ihex target/teensy-micro-mod.hex",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            }
+        },
+        {
+            "label": "Build HEX - USB Mic SINE",
+            "type": "shell",
+            "command": "cargo objcopy --bin usb_mic_sine --release -- -O ihex target/teensy-micro-mod.hex",
             "options": {
                 "cwd": "${workspaceFolder}"
             }
