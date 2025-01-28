@@ -10,13 +10,16 @@ use teensy4_panic as _;
 mod app {
     use board::t40 as my_board;
     use bsp::board;
+    use core::f32::consts::PI;
+    use libm::sinf;
     use rtic_monotonics::systick::{Systick, *};
     use teensy4_bsp as bsp;
-    use usb_device::{bus::UsbBusAllocator, class_prelude::UsbClass, prelude::*};
+    use usb_device::{bus::UsbBusAllocator, class_prelude::UsbClass, prelude::*, UsbError};
     use usbd_audio::{AudioClassBuilder, Format, StreamConfig, TerminalType};
 
     #[shared]
     struct Shared {
+        sample_index: u32,
         // store the buffer for sine samples
     }
 
@@ -84,13 +87,20 @@ mod app {
         main_task::spawn().unwrap();
         blink::spawn().unwrap();
         (
-            Shared {},
+            Shared { sample_index: 0 },
             Local {
                 led,
                 usb_dev,
                 usb_audio,
             },
         )
+    }
+
+    fn generate_sine_sample(sample_index: u32, frequency: f32, sample_rate: f32) -> i16 {
+        let time = sample_index as f32 / sample_rate;
+        let angle = 2.0 * PI * frequency * time;
+        let amplitude = 0.5; // 50% of max volume
+        (amplitude * sinf(angle) * 32767.0) as i16
     }
 
     #[task(local = [led])]
@@ -101,17 +111,47 @@ mod app {
         }
     }
 
-    #[task(local =[usb_dev, usb_audio])]
+    #[task(local =[usb_dev, usb_audio], shared = [sample_index])]
     async fn main_task(mut cx: main_task::Context) {
         let usb_dev = &mut cx.local.usb_dev;
         let usb_audio = cx.local.usb_audio;
+
+        // Calculate samples per transfer:
+        // At 44.1kHz, we send 44.1 samples per millisecond
+        // USB full-speed isochronous transfers happen every 1ms frame
+        const SAMPLE_RATE: f32 = 44_100.0;
+        const USB_FRAME_MS: u32 = 1;
+        const SAMPLES_PER_TRANSFER: usize = 44; // ~44 samples per transfer
+        const SINE_FREQ: f32 = 550.0;
+
+        let mut sample_buffer = [0i16; SAMPLES_PER_TRANSFER];
 
         loop {
             Systick::delay(1000.micros()).await;
             if usb_dev.poll(&mut [usb_audio as &mut dyn UsbClass<bsp::hal::usbd::BusAdapter>]) {
                 match usb_audio.input_alt_setting() {
-                    Ok(alt) => {}
-                    Err(_) => {}
+                    Ok(alt) if alt > 0 => {
+                        // Fill the buffer with sine wave samples
+                        for i in 0..SAMPLES_PER_TRANSFER {
+                            let sample_idx = cx.shared.sample_index.lock(|idx| {
+                                *idx += 1;
+                                *idx
+                            });
+                            sample_buffer[i] =
+                                generate_sine_sample(sample_idx, SINE_FREQ, SAMPLE_RATE);
+                        }
+
+                        // Convert i16 samples to bytes (2 bytes per sample in little-endian format)
+                        let bytes: [u8; SAMPLES_PER_TRANSFER * 2] = unsafe {
+                            core::mem::transmute::<
+                                [i16; SAMPLES_PER_TRANSFER],
+                                [u8; SAMPLES_PER_TRANSFER * 2],
+                            >(sample_buffer)
+                        };
+                        // Send the samples
+                        usb_audio.write(&bytes);
+                    }
+                    _ => {}
                 }
             }
         }

@@ -14,6 +14,8 @@ log = { version = "0.4", features = ["max_level_debug", "release_max_level_info"
 teensy4-panic = { version = "0.2", features = ["log"] }
 usbd-audio = "0.1.0"
 usb-device = { version = "0.2.9", features = ["control-buffer-256"] }
+micromath = "2.1.0"
+libm = "0.2.11"
 
 [dependencies.teensy4-bsp]
 version = "0.5"
