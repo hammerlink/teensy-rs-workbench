@@ -13,7 +13,7 @@ log = { version = "0.4", features = ["max_level_debug", "release_max_level_info"
 
 teensy4-panic = { version = "0.2", features = ["log"] }
 usbd-audio = "0.1.0"
-usb-device = { version = "0.3.2", features = ["control-buffer-256"] }
+usb-device = { version = "0.2.9", features = ["control-buffer-256"] }
 
 [dependencies.teensy4-bsp]
 version = "0.5"
@@ -32,3 +32,15 @@ testing = []
 # Helps with build times.
 [profile.release.build-override]
 opt-level = 0
+
+[[bin]]
+name = "blink"
+path = "src/bin/blink.rs"
+
+[[bin]]
+name = "template"
+path = "src/bin/template.rs"
+
+[[bin]]
+name = "usb_mic_sine"
+path = "src/bin/usb_mic_sine.rs"
