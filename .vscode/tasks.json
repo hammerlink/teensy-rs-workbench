@@ -18,6 +18,14 @@
             }
         },
         {
+            "label": "Build HEX - USB Mic SINE v2",
+            "type": "shell",
+            "command": "cargo objcopy --bin usb_mic_v2 --release -- -O ihex target/teensy-micro-mod.hex",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            }
+        },
+        {
             "label": "Deploy HEX - micro mod",
             "type": "shell",
             "command": "teensy_loader_cli --mcu=TEENSY_MICROMOD -w target/teensy-micro-mod.hex",
