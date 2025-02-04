@@ -44,6 +44,7 @@ mod app {
     use teensy_rs_workbench::{
         clock_tree::{perclk_frequency, uart_frequency, RunMode},
         logging,
+        usb_utils::UsbBuffer,
     };
     //use imxrt_iomuxc as iomuxc;
     use usb_device::{
@@ -59,7 +60,7 @@ mod app {
     const PRODUCT: &str = "imxrt-hal-example";
     /// How frequently should we poll the logger?
     const PIT_FREQUENCY: u32 = perclk_frequency(RunMode::Overdrive);
-    const LPUART_POLL_INTERVAL_MS: u32 = PIT_FREQUENCY / 1_000 * 100;
+    const LPUART_POLL_INTERVAL_MS: u32 = PIT_FREQUENCY / 1_000 * 100; // resolves to 7_500_000
     /// Change me to change how log messages are serialized.
     ///
     /// If changing to `Defmt`, you'll need to update the logging macros in
@@ -113,19 +114,7 @@ mod app {
 
         let led = board::led(&mut gpio2, pins.p13);
 
-        //let device_iomuxc = unsafe { bsp::ral::iomuxc::IOMUXC::instance() };
         let pads = unsafe { Pads::new() };
-
-        //const SPI_PIN_CONFIG: imxrt_iomuxc::Config = bsp::ral::iomuxc::Config::zero()
-        //    .set_drive_strength(bsp::ral::iomuxc::DriveStrength::R0_4)
-        //    .set_open_drain(bsp::ral::iomuxc::OpenDrain::Disabled)
-        //    .set_hysteresis(bsp::ral::iomuxc::Hysteresis::Disabled)
-        //    .set_pull_keeper(None);
-        //
-        //bsp::ral::bsp::ral::iomuxc::configure(&mut gpio_b0.p02, SPI_PIN_CONFIG);
-        //iomuxc::configure(&mut gpio_b0.p01, SPI_PIN_CONFIG);
-        //iomuxc::configure(&mut gpio_b0.p03, SPI_PIN_CONFIG);
-        //iomuxc::configure(&mut gpio_b0.p00, SPI_PIN_CONFIG);
 
         let lpuart2 = unsafe { bsp::ral::lpuart::LPUART2::instance() };
         let mut console = hal::lpuart::Lpuart::new(
@@ -180,15 +169,17 @@ mod app {
         ctx.local.poller.poll();
     }
 
-    #[task(binds = USB_OTG1, local = [class, device, led, configured: bool = false], priority = 2)]
+    #[task(binds = USB_OTG1, local = [class, device, led, configured: bool = false, ctr: usize = 0], priority = 2)]
     fn usb1(ctx: usb1::Context) {
         let usb1::LocalResources {
             class,
             device,
             configured,
             led,
+            ctr,
             ..
         } = ctx.local;
+        *ctr += 1;
 
         if device.poll(&mut [class]) {
             if device.state() == UsbDeviceState::Configured {
@@ -202,10 +193,10 @@ mod app {
                     Ok(count) => {
                         led.toggle();
                         class.write(&buffer[..count]).ok();
-                        log::info!(
-                            "Received '{}' from the host",
-                            core::str::from_utf8(&buffer[..count]).unwrap_or("???")
-                        );
+
+                        let mut buffer = UsbBuffer::<64>::new();
+                        let formatted = buffer.format(format_args!("the counter {}\r\n", ctr));
+                        class.write(formatted).ok();
                     }
                     Err(usb_device::UsbError::WouldBlock) => {}
                     Err(err) => log::error!("{:?}", err),

@@ -1,3 +1,9 @@
+use hal::dma::channel::Channel;
+use hal::lpuart::Lpuart;
+use hal::usbd::Instances;
+use imxrt_hal as hal;
+pub use imxrt_log::Poller;
+
 /// Select the logging front-end.
 #[derive(Debug, defmt::Format, PartialEq, Eq)]
 pub enum Frontend {
@@ -15,13 +21,7 @@ pub enum Backend {
     /// Use LPUART and DMA.
     Lpuart,
 }
-use hal::dma::channel::Channel;
-use hal::lpuart::Lpuart;
-use hal::usbd::Instances;
-use imxrt_hal as hal;
-pub use imxrt_log::Poller;
-
-pub const BACKEND: Backend = Backend::Usbd;
+pub const BACKEND: Backend = Backend::Lpuart;
 
 /// Initialize the logger.
 pub fn init<P, const LPUART: u8, const USBD: u8>(
