@@ -43,8 +43,9 @@ mod app {
 
     use teensy_rs_workbench::{
         clock_tree::{perclk_frequency, uart_frequency, RunMode},
-        logging,
-        usb_utils::UsbBuffer,
+        logging, u8_bytes,
+        usb_utils::{SerialBuffer, UsbBuffer},
+        usb_write,
     };
     //use imxrt_iomuxc as iomuxc;
     use usb_device::{
@@ -91,7 +92,6 @@ mod app {
 
     #[local]
     struct Local {
-        class: SerialPort<'static, Bus>,
         device: UsbDevice<'static, Bus>,
         led: board::Led,
         poller: Poller,
@@ -99,7 +99,11 @@ mod app {
     }
 
     #[shared]
-    struct Shared {}
+    struct Shared {
+        serial_buffer: SerialBuffer<2048>,
+        configured: bool,
+        usb_serial: SerialPort<'static, Bus>,
+    }
 
     #[init(local = [bus: Option<UsbBusAllocator<Bus>> = None])]
     fn init(ctx: init::Context) -> (Shared, Local) {
@@ -149,9 +153,12 @@ mod app {
             .build();
 
         (
-            Shared {},
+            Shared {
+                serial_buffer: SerialBuffer::<2048>::new(),
+                configured: false,
+                usb_serial: class,
+            },
             Local {
-                class,
                 device,
                 led,
                 poller,
@@ -161,49 +168,65 @@ mod app {
     }
 
     /// Occasionally try to poll the logger.
-    #[task(binds = PIT, local = [poller, timer], priority = 1)]
-    fn pit_interrupt(ctx: pit_interrupt::Context) {
+    #[task(binds = PIT, local = [poller, timer, ctr: usize = 0], shared = [serial_buffer], priority = 1)]
+    fn pit_interrupt(mut ctx: pit_interrupt::Context) {
         while ctx.local.timer.is_elapsed() {
             ctx.local.timer.clear_elapsed();
         }
         ctx.local.poller.poll();
+        *ctx.local.ctr += 1;
+        // Add some test data to the buffer
+        ctx.shared.serial_buffer.lock(|buffer| {
+            buffer.write(format_args!("pit timer ctr {} \r\n", ctx.local.ctr));
+        });
     }
 
-    #[task(binds = USB_OTG1, local = [class, device, led, configured: bool = false, ctr: usize = 0], priority = 2)]
-    fn usb1(ctx: usb1::Context) {
+    #[task(binds = USB_OTG1, local = [device, led, ctr: usize = 0, configured: bool = false], shared = [serial_buffer, configured, usb_serial], priority = 2)]
+    fn usb1(mut ctx: usb1::Context) {
         let usb1::LocalResources {
-            class,
             device,
-            configured,
             led,
             ctr,
+            configured,
             ..
         } = ctx.local;
         *ctr += 1;
 
-        if device.poll(&mut [class]) {
-            if device.state() == UsbDeviceState::Configured {
-                if !*configured {
-                    device.bus().configure();
+        ctx.shared.usb_serial.lock(|class| {
+            if device.poll(&mut [class]) {
+                if device.state() == UsbDeviceState::Configured {
+                    if !*configured {
+                        device.bus().configure();
+                        ctx.shared.configured.lock(|x| *x = true);
+                        *configured = true;
+                    }
                 }
-                *configured = true;
-
+                ctx.shared.serial_buffer.lock(|buffer| {
+                    if buffer.has_data() {
+                        let mut read_cursor: usize = 0;
+                        while let Some(chunk) = buffer.read_chunk(64, read_cursor) {
+                            if class.write(chunk).is_err() {
+                                break;
+                            }
+                            read_cursor += chunk.len();
+                            if read_cursor >= buffer.get_buffer().len() {
+                                break;
+                            }
+                        }
+                        buffer.clear();
+                    }
+                });
                 let mut buffer = [0; 64];
                 match class.read(&mut buffer) {
                     Ok(count) => {
                         led.toggle();
                         class.write(&buffer[..count]).ok();
-
-                        let mut buffer = UsbBuffer::<64>::new();
-                        let formatted = buffer.format(format_args!("the counter {}\r\n", ctr));
-                        class.write(formatted).ok();
+                        usb_write!(class, "the counter {} \r\n", ctr);
                     }
                     Err(usb_device::UsbError::WouldBlock) => {}
                     Err(err) => log::error!("{:?}", err),
                 }
-            } else {
-                *configured = false;
             }
-        }
+        });
     }
 }
