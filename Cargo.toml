@@ -18,6 +18,7 @@ imxrt-log = { path= "/home/hendrik/Programs/rust_embedded/imxrt-hal-clean/loggin
 imxrt-iomuxc = { version = "0.3.0", features = ["imxrt1060"] }
 defmt = "0.3.10"
 defmt-rtt = "0.4.1"
+log = "0.4.25"
 
 
 [dependencies.teensy4-bsp]

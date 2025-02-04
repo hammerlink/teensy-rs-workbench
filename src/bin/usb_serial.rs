@@ -33,7 +33,6 @@ mod app {
     use bsp::board;
     use hal::usbd::{BusAdapter, EndpointMemory, EndpointState, Speed};
     use imxrt_hal as hal;
-    use imxrt_hal::ccm::analog;
     use imxrt_iomuxc::imxrt1060::Pads;
     use imxrt_log::Poller;
     use teensy4_bsp as bsp;
@@ -42,7 +41,10 @@ mod app {
     // change 't40' to 't41' or micromod, respectively.
     use board::t40 as my_board;
 
-    use teensy_rs_workbench::logging;
+    use teensy_rs_workbench::{
+        clock_tree::{perclk_frequency, uart_frequency, RunMode},
+        logging,
+    };
     //use imxrt_iomuxc as iomuxc;
     use usb_device::{
         bus::UsbBusAllocator,
@@ -50,33 +52,14 @@ mod app {
     };
     use usbd_serial::SerialPort;
 
-    /// SOC run mode.
-    ///
-    /// Each MCU specifies its own core clock speed
-    /// and power settings for these variants. They're
-    /// typically follow the recommendations in the
-    /// data sheet.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, defmt::Format)]
-    #[non_exhaustive]
-    pub enum RunMode {
-        /// The fastest, highest-power mode.
-        Overdrive,
-    }
-
-    pub const fn uart_frequency(run_mode: RunMode) -> u32 {
-        let hz = match run_mode {
-            RunMode::Overdrive => analog::pll3::FREQUENCY / 6,
-        };
-        hz
-    }
-
     /// Change me if you want to play with a full-speed USB device.
     const SPEED: Speed = Speed::High;
     /// Matches whatever is in imxrt-log.
     const VID_PID: UsbVidPid = UsbVidPid(0x5824, 0x27dd);
     const PRODUCT: &str = "imxrt-hal-example";
     /// How frequently should we poll the logger?
-    const LPUART_POLL_INTERVAL_MS: u32 = board::PIT_FREQUENCY / 1_000 * 100;
+    const PIT_FREQUENCY: u32 = perclk_frequency(RunMode::Overdrive);
+    const LPUART_POLL_INTERVAL_MS: u32 = PIT_FREQUENCY / 1_000 * 100;
     /// Change me to change how log messages are serialized.
     ///
     /// If changing to `Defmt`, you'll need to update the logging macros in
@@ -119,17 +102,6 @@ mod app {
 
     #[init(local = [bus: Option<UsbBusAllocator<Bus>> = None])]
     fn init(ctx: init::Context) -> (Shared, Local) {
-        //let (
-        //    board::Common {
-        //        pit: (mut timer, _, _, _),
-        //        usb1,
-        //        usbnc1,
-        //        usbphy1,
-        //        mut dma,
-        //        ..
-        //    },
-        //    board::Specifics { led, console, .. },
-        //) = board::new();
         let board::Resources {
             mut gpio2,
             pins,
@@ -141,7 +113,7 @@ mod app {
 
         let led = board::led(&mut gpio2, pins.p13);
 
-        let device_iomuxc = unsafe { bsp::ral::iomuxc::IOMUXC::instance() };
+        //let device_iomuxc = unsafe { bsp::ral::iomuxc::IOMUXC::instance() };
         let pads = unsafe { Pads::new() };
 
         //const SPI_PIN_CONFIG: imxrt_iomuxc::Config = bsp::ral::iomuxc::Config::zero()

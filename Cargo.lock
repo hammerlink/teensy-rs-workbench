@@ -709,6 +709,7 @@ dependencies = [
  "imxrt-iomuxc",
  "imxrt-log",
  "libm",
+ "log",
  "micromath",
  "rtic",
  "rtic-monotonics",

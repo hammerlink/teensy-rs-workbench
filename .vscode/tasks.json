@@ -26,6 +26,14 @@
             }
         },
         {
+            "label": "Build HEX - USB Serial",
+            "type": "shell",
+            "command": "cargo objcopy --bin usb_serial --release -- -O ihex target/teensy-micro-mod.hex",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            }
+        },
+        {
             "label": "Deploy HEX - micro mod",
             "type": "shell",
             "command": "teensy_loader_cli --mcu=TEENSY_MICROMOD -w target/teensy-micro-mod.hex",
