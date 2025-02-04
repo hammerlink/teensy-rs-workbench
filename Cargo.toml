@@ -13,6 +13,11 @@ usb-device = { version = "0.3.2", features = ["control-buffer-256"] }
 micromath = "2.1.0"
 libm = "0.2.11"
 imxrt-hal = { path= "/home/hendrik/Programs/rust_embedded/imxrt-hal-clean/", features = ["imxrt1060"] }
+usbd-serial = "0.2.2"
+imxrt-log = { path= "/home/hendrik/Programs/rust_embedded/imxrt-hal-clean/logging/"}
+imxrt-iomuxc = { version = "0.3.0", features = ["imxrt1060"] }
+defmt = "0.3.10"
+defmt-rtt = "0.4.1"
 
 
 [dependencies.teensy4-bsp]
