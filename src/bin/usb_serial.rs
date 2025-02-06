@@ -50,8 +50,9 @@ mod app {
     //use imxrt_iomuxc as iomuxc;
     use usb_device::{
         bus::UsbBusAllocator,
-        device::{UsbDevice, UsbDeviceBuilder, UsbDeviceState, UsbVidPid},
+        device::{StringDescriptors, UsbDevice, UsbDeviceBuilder, UsbDeviceState, UsbVidPid}, LangID,
     };
+    use usbd_audio::{AudioClass, AudioClassBuilder, Format, StreamConfig, TerminalType};
     use usbd_serial::SerialPort;
 
     /// Change me if you want to play with a full-speed USB device.
@@ -85,7 +86,7 @@ mod app {
     /// of endpoints; we're not using all the endpoints in this example.
     static EP_STATE: EndpointState = EndpointState::max_endpoints();
 
-    const TIMER_MICRO_SECONDS: u32 = 500_000;
+    const TIMER_MICRO_SECONDS: u32 = 1_000;
 
     type Bus = BusAdapter;
 
@@ -102,6 +103,7 @@ mod app {
         serial_buffer: SerialBuffer<2048>,
         configured: bool,
         usb_serial: SerialPort<'static, Bus>,
+        usb_audio: AudioClass<'static, Bus>,
     }
 
     #[init(local = [bus: Option<UsbBusAllocator<Bus>> = None])]
@@ -143,10 +145,36 @@ mod app {
 
         let bus = ctx.local.bus.insert(UsbBusAllocator::new(bus));
         let class = SerialPort::new(bus);
+
+        let string_descriptor = StringDescriptors::new(LangID::EN_US)
+            .manufacturer("Hammernet")
+            .product("Audio Port - Teensy 4")
+            .serial_number("42");
+        // Configure USB Audio
+        let audio_class = AudioClassBuilder::new()
+            .input(
+                StreamConfig::new_discrete(Format::S16le, 1, &[48_000], TerminalType::InMicrophone)
+                    .unwrap(),
+            )
+            .output(
+                StreamConfig::new_discrete(
+                    Format::S24le,
+                    2,
+                    &[44_100, 48_000],
+                    TerminalType::OutSpeaker,
+                )
+                .unwrap(),
+            )
+            .build(bus)
+            .unwrap();
         let device = UsbDeviceBuilder::new(bus, VID_PID)
-            .strings(&[usb_device::device::StringDescriptors::default().product(PRODUCT)])
+            .max_packet_size_0(64)
             .unwrap()
-            .device_class(0xef)
+            .strings(&[string_descriptor])
+            .unwrap()
+            .device_class(0x01) // Audio class
+            .device_sub_class(0x00)
+            .device_protocol(0x00)
             .max_packet_size_0(64)
             .unwrap()
             .build();
@@ -156,6 +184,7 @@ mod app {
                 serial_buffer: SerialBuffer::<2048>::new(),
                 configured: false,
                 usb_serial: class,
+                usb_audio: audio_class,
             },
             Local {
                 device,
@@ -175,10 +204,15 @@ mod app {
         ctx.local.poller.poll();
         *ctx.local.ctr += 1;
 
-        // Add some test data to the buffer
-        ctx.shared.serial_buffer.lock(|buffer| {
-            buffer.write(format_args!("pit timer ctr {} \r\n", ctx.local.ctr));
-        });
+        if *ctx.local.ctr % 1000 == 0 {
+            // Add some test data to the buffer
+            ctx.shared.serial_buffer.lock(|buffer| {
+                buffer.write(format_args!("pit timer ctr {} \r\n", ctx.local.ctr));
+            });
+            if *ctx.local.ctr >= 10_000usize {
+                *ctx.local.ctr = 0usize;
+            }
+        }
         let is_configured = ctx.shared.configured.lock(|configured| *configured);
         if is_configured {
             ctx.shared.serial_buffer.lock(|buffer| {
@@ -205,7 +239,7 @@ mod app {
         }
     }
 
-    #[task(binds = USB_OTG1, local = [device, led, ctr: usize = 0, configured: bool = false], shared = [serial_buffer, configured, usb_serial], priority = 2)]
+    #[task(binds = USB_OTG1, local = [device, led, ctr: usize = 0, configured: bool = false], shared = [serial_buffer, configured, usb_serial, usb_audio], priority = 2)]
     fn usb1(mut ctx: usb1::Context) {
         let usb1::LocalResources {
             device,
@@ -216,26 +250,28 @@ mod app {
         } = ctx.local;
         *ctr += 1;
 
-        ctx.shared.usb_serial.lock(|class| {
-            if device.poll(&mut [class]) {
-                if device.state() == UsbDeviceState::Configured {
-                    if !*configured {
-                        device.bus().configure();
-                        ctx.shared.configured.lock(|x| *x = true);
-                        *configured = true;
+        ctx.shared.usb_serial.lock(|usb_serial| {
+            ctx.shared.usb_audio.lock(|usb_audio| {
+                if device.poll(&mut [usb_serial, usb_audio]) {
+                    if device.state() == UsbDeviceState::Configured {
+                        if !*configured {
+                            device.bus().configure();
+                            ctx.shared.configured.lock(|x| *x = true);
+                            *configured = true;
+                        }
+                    }
+                    let mut buffer = [0; 64];
+                    match usb_serial.read(&mut buffer) {
+                        Ok(count) => {
+                            led.toggle();
+                            usb_serial.write(&buffer[..count]).ok();
+                            usb_write!(usb_serial, "the counter {} \r\n", ctr);
+                        }
+                        Err(usb_device::UsbError::WouldBlock) => {}
+                        Err(err) => log::error!("{:?}", err),
                     }
                 }
-                let mut buffer = [0; 64];
-                match class.read(&mut buffer) {
-                    Ok(count) => {
-                        led.toggle();
-                        class.write(&buffer[..count]).ok();
-                        usb_write!(class, "the counter {} \r\n", ctr);
-                    }
-                    Err(usb_device::UsbError::WouldBlock) => {}
-                    Err(err) => log::error!("{:?}", err),
-                }
-            }
+            });
         });
     }
 }
