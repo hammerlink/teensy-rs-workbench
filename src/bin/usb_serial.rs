@@ -50,7 +50,8 @@ mod app {
     //use imxrt_iomuxc as iomuxc;
     use usb_device::{
         bus::UsbBusAllocator,
-        device::{StringDescriptors, UsbDevice, UsbDeviceBuilder, UsbDeviceState, UsbVidPid}, LangID,
+        device::{StringDescriptors, UsbDevice, UsbDeviceBuilder, UsbDeviceState, UsbVidPid},
+        LangID,
     };
     use usbd_audio::{AudioClass, AudioClassBuilder, Format, StreamConfig, TerminalType};
     use usbd_serial::SerialPort;
@@ -104,6 +105,7 @@ mod app {
         configured: bool,
         usb_serial: SerialPort<'static, Bus>,
         usb_audio: AudioClass<'static, Bus>,
+        usb_interrupt_counter: usize,
     }
 
     #[init(local = [bus: Option<UsbBusAllocator<Bus>> = None])]
@@ -185,6 +187,7 @@ mod app {
                 configured: false,
                 usb_serial: class,
                 usb_audio: audio_class,
+                usb_interrupt_counter: 0,
             },
             Local {
                 device,
@@ -201,14 +204,15 @@ mod app {
         while ctx.local.timer.is_elapsed() {
             ctx.local.timer.clear_elapsed();
         }
-        ctx.local.poller.poll();
         *ctx.local.ctr += 1;
 
+        // triggers every second
         if *ctx.local.ctr % 1000 == 0 {
             // Add some test data to the buffer
             ctx.shared.serial_buffer.lock(|buffer| {
                 buffer.write(format_args!("pit timer ctr {} \r\n", ctx.local.ctr));
             });
+            ctx.local.poller.poll();
             if *ctx.local.ctr >= 10_000usize {
                 *ctx.local.ctr = 0usize;
             }
@@ -239,18 +243,26 @@ mod app {
         }
     }
 
-    #[task(binds = USB_OTG1, local = [device, led, ctr: usize = 0, configured: bool = false], shared = [serial_buffer, configured, usb_serial, usb_audio], priority = 2)]
+    #[task(binds = USB_OTG1, local = [device, led, configured: bool = false], shared = [serial_buffer, configured, usb_serial, usb_audio, usb_interrupt_counter], priority = 2)]
     fn usb1(mut ctx: usb1::Context) {
         let usb1::LocalResources {
             device,
             led,
-            ctr,
             configured,
             ..
         } = ctx.local;
-        *ctr += 1;
+        let counter = ctx.shared.usb_interrupt_counter.lock(|ctr| {
+            *ctr += 1;
+            *ctr
+        });
 
         ctx.shared.usb_serial.lock(|usb_serial| {
+            if counter % 10 == 0 {
+                usb_write!(usb_serial, "usb1 interrupt counter {} \r\n", counter);
+                if counter >= 1_000_000 {
+                    ctx.shared.usb_interrupt_counter.lock(|ctr| *ctr = 0);
+                }
+            }
             ctx.shared.usb_audio.lock(|usb_audio| {
                 if device.poll(&mut [usb_serial, usb_audio]) {
                     if device.state() == UsbDeviceState::Configured {
@@ -265,7 +277,7 @@ mod app {
                         Ok(count) => {
                             led.toggle();
                             usb_serial.write(&buffer[..count]).ok();
-                            usb_write!(usb_serial, "the counter {} \r\n", ctr);
+                            usb_write!(usb_serial, "the counter {} \r\n", counter);
                         }
                         Err(usb_device::UsbError::WouldBlock) => {}
                         Err(err) => log::error!("{:?}", err),
