@@ -42,8 +42,8 @@ mod app {
     use board::t40 as my_board;
 
     use teensy_rs_workbench::{
-        clock_tree::{perclk_frequency, uart_frequency, RunMode},
-        logging, u8_bytes,
+        clock_tree::{uart_frequency, RunMode},
+        logging,
         usb_utils::{SerialBuffer, UsbBuffer},
         usb_write,
     };
@@ -59,9 +59,6 @@ mod app {
     /// Matches whatever is in imxrt-log.
     const VID_PID: UsbVidPid = UsbVidPid(0x5824, 0x27dd);
     const PRODUCT: &str = "imxrt-hal-example";
-    /// How frequently should we poll the logger?
-    const PIT_FREQUENCY: u32 = perclk_frequency(RunMode::Overdrive);
-    const LPUART_POLL_INTERVAL_MS: u32 = PIT_FREQUENCY / 1_000 * 100; // resolves to 7_500_000
     /// Change me to change how log messages are serialized.
     ///
     /// If changing to `Defmt`, you'll need to update the logging macros in
@@ -87,6 +84,8 @@ mod app {
     /// This manages the endpoints. It's large enough to hold the maximum number
     /// of endpoints; we're not using all the endpoints in this example.
     static EP_STATE: EndpointState = EndpointState::max_endpoints();
+
+    const TIMER_MICRO_SECONDS: u32 = 500_000;
 
     type Bus = BusAdapter;
 
@@ -132,7 +131,7 @@ mod app {
             console.set_baud(&CONSOLE_BAUD);
             console.set_parity(None);
         });
-        timer.set_load_timer_value(LPUART_POLL_INTERVAL_MS);
+        timer.set_load_timer_value(TIMER_MICRO_SECONDS);
         timer.set_interrupt_enable(true);
         timer.enable();
 
@@ -147,7 +146,7 @@ mod app {
         let device = UsbDeviceBuilder::new(bus, VID_PID)
             .strings(&[usb_device::device::StringDescriptors::default().product(PRODUCT)])
             .unwrap()
-            .device_class(usbd_serial::USB_CLASS_CDC)
+            .device_class(0xef)
             .max_packet_size_0(64)
             .unwrap()
             .build();
@@ -168,17 +167,42 @@ mod app {
     }
 
     /// Occasionally try to poll the logger.
-    #[task(binds = PIT, local = [poller, timer, ctr: usize = 0], shared = [serial_buffer], priority = 1)]
+    #[task(binds = PIT, local = [poller, timer, ctr: usize = 0], shared = [serial_buffer, configured, usb_serial], priority = 1)]
     fn pit_interrupt(mut ctx: pit_interrupt::Context) {
         while ctx.local.timer.is_elapsed() {
             ctx.local.timer.clear_elapsed();
         }
         ctx.local.poller.poll();
         *ctx.local.ctr += 1;
+
         // Add some test data to the buffer
         ctx.shared.serial_buffer.lock(|buffer| {
             buffer.write(format_args!("pit timer ctr {} \r\n", ctx.local.ctr));
         });
+        let is_configured = ctx.shared.configured.lock(|configured| *configured);
+        if is_configured {
+            ctx.shared.serial_buffer.lock(|buffer| {
+                if !buffer.has_data() {
+                    return;
+                }
+                let mut read_cursor: usize = 0;
+                while let Some(chunk) = buffer.read_chunk(64, read_cursor) {
+                    if ctx
+                        .shared
+                        .usb_serial
+                        .lock(|serial| serial.write(chunk))
+                        .is_err()
+                    {
+                        break;
+                    }
+                    read_cursor += chunk.len();
+                    if read_cursor >= buffer.get_buffer().len() {
+                        break;
+                    }
+                }
+                buffer.clear();
+            });
+        }
     }
 
     #[task(binds = USB_OTG1, local = [device, led, ctr: usize = 0, configured: bool = false], shared = [serial_buffer, configured, usb_serial], priority = 2)]
@@ -201,21 +225,6 @@ mod app {
                         *configured = true;
                     }
                 }
-                ctx.shared.serial_buffer.lock(|buffer| {
-                    if buffer.has_data() {
-                        let mut read_cursor: usize = 0;
-                        while let Some(chunk) = buffer.read_chunk(64, read_cursor) {
-                            if class.write(chunk).is_err() {
-                                break;
-                            }
-                            read_cursor += chunk.len();
-                            if read_cursor >= buffer.get_buffer().len() {
-                                break;
-                            }
-                        }
-                        buffer.clear();
-                    }
-                });
                 let mut buffer = [0; 64];
                 match class.read(&mut buffer) {
                     Ok(count) => {
