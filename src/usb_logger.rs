@@ -12,7 +12,7 @@ pub struct UsbLogger {
 impl UsbLogger {
     const fn new() -> Self {
         UsbLogger {
-            level: LevelFilter::Debug,
+            level: LevelFilter::Trace,
         }
     }
 }
@@ -47,7 +47,7 @@ pub fn init_logger() -> Result<(), log::SetLoggerError> {
     }
 
     log::set_logger(&LOGGER).map(|()| {
-        log::set_max_level(LevelFilter::Debug);
+        log::set_max_level(LevelFilter::Trace);
         LOGGER_INITIALIZED.store(true, Ordering::Relaxed);
     })
 }
