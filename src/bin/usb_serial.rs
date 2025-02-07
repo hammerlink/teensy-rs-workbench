@@ -34,7 +34,6 @@ mod app {
     use hal::usbd::{BusAdapter, EndpointMemory, EndpointState, Speed};
     use imxrt_hal as hal;
     use imxrt_iomuxc::imxrt1060::Pads;
-    use imxrt_log::Poller;
     use teensy4_bsp as bsp;
 
     // If you're using a Teensy 4.1 or MicroMod, you should eventually
@@ -43,7 +42,7 @@ mod app {
 
     use teensy_rs_workbench::{
         clock_tree::{uart_frequency, RunMode},
-        logging,
+        usb_logger::{self, LOG_SERIAL_BUFFER},
         usb_utils::{SerialBuffer, UsbBuffer},
         usb_write,
     };
@@ -60,17 +59,6 @@ mod app {
     const SPEED: Speed = Speed::High;
     /// Matches whatever is in imxrt-log.
     const VID_PID: UsbVidPid = UsbVidPid(0x5824, 0x27dd);
-    const PRODUCT: &str = "imxrt-hal-example";
-    /// Change me to change how log messages are serialized.
-    ///
-    /// If changing to `Defmt`, you'll need to update the logging macros in
-    /// this example. You'll also need to make sure the USB device you're debugging
-    /// uses `defmt`.
-    const FRONTEND: logging::Frontend = logging::Frontend::Log;
-
-    /// Use this symbol to access the 'DMA_A' channel in the
-    /// collection of all DMA channels.
-    const BOARD_DMA_A_INDEX: usize = 7;
 
     pub const RUN_MODE: RunMode = RunMode::Overdrive;
     /// The UART clock frequency (Hz).
@@ -95,8 +83,8 @@ mod app {
     struct Local {
         device: UsbDevice<'static, Bus>,
         led: board::Led,
-        poller: Poller,
         timer: hal::pit::Pit<0>,
+        log_init_error: &'static str,
     }
 
     #[shared]
@@ -115,7 +103,6 @@ mod app {
             pins,
             usb,
             pit: (mut timer, _, _, _),
-            mut dma,
             ..
         } = my_board(ctx.device);
 
@@ -139,8 +126,16 @@ mod app {
         timer.set_interrupt_enable(true);
         timer.enable();
 
-        let dma_a = dma[BOARD_DMA_A_INDEX].take().unwrap();
-        let poller = logging::lpuart(FRONTEND, console, dma_a);
+        let serial_buffer = SerialBuffer::<2048>::new();
+        let log_init_error = match usb_logger::init_logger() {
+            Ok(_) => {
+                // Test the logger immediately after initialization
+                log::info!("Logger initialization successful");
+                log::debug!("Debug logging enabled");
+                ""
+            }
+            Err(_) => "Logger initialization failed",
+        };
 
         let bus = BusAdapter::with_speed(usb, &EP_MEMORY, &EP_STATE, SPEED);
         bus.set_interrupts(true);
@@ -169,6 +164,7 @@ mod app {
             )
             .build(bus)
             .unwrap();
+
         let device = UsbDeviceBuilder::new(bus, VID_PID)
             .max_packet_size_0(64)
             .unwrap()
@@ -183,7 +179,7 @@ mod app {
 
         (
             Shared {
-                serial_buffer: SerialBuffer::<2048>::new(),
+                serial_buffer,
                 configured: false,
                 usb_serial: class,
                 usb_audio: audio_class,
@@ -192,14 +188,15 @@ mod app {
             Local {
                 device,
                 led,
-                poller,
+                //poller,
                 timer,
+                log_init_error,
             },
         )
     }
 
     /// Occasionally try to poll the logger.
-    #[task(binds = PIT, local = [poller, timer, ctr: usize = 0], shared = [serial_buffer, configured, usb_serial], priority = 1)]
+    #[task(binds = PIT, local = [log_init_error, timer, ctr: usize = 0], shared = [serial_buffer, configured, usb_serial], priority = 1)]
     fn pit_interrupt(mut ctx: pit_interrupt::Context) {
         while ctx.local.timer.is_elapsed() {
             ctx.local.timer.clear_elapsed();
@@ -210,9 +207,11 @@ mod app {
         if *ctx.local.ctr % 1000 == 0 {
             // Add some test data to the buffer
             ctx.shared.serial_buffer.lock(|buffer| {
-                buffer.write(format_args!("pit timer ctr {} \r\n", ctx.local.ctr));
+                buffer.write(format_args!(
+                    "pit timer ctr {} - {} \r\n",
+                    ctx.local.ctr, ctx.local.log_init_error
+                ));
             });
-            ctx.local.poller.poll();
             if *ctx.local.ctr >= 10_000usize {
                 *ctx.local.ctr = 0usize;
             }
@@ -239,6 +238,30 @@ mod app {
                     }
                 }
                 buffer.clear();
+                // LOG_SERIAL_BUFFER
+                // Handle the logging buffer
+                unsafe {
+                    if let Some(log_buffer) = LOG_SERIAL_BUFFER.as_mut() {
+                        if log_buffer.has_data() {
+                            let mut read_cursor: usize = 0;
+                            while let Some(chunk) = log_buffer.read_chunk(64, read_cursor) {
+                                if ctx
+                                    .shared
+                                    .usb_serial
+                                    .lock(|serial| serial.write(chunk))
+                                    .is_err()
+                                {
+                                    break;
+                                }
+                                read_cursor += chunk.len();
+                                if read_cursor >= log_buffer.get_buffer().len() {
+                                    break;
+                                }
+                            }
+                            log_buffer.clear();
+                        }
+                    }
+                }
             });
         }
     }
@@ -259,6 +282,7 @@ mod app {
         ctx.shared.usb_serial.lock(|usb_serial| {
             if counter % 10 == 0 {
                 usb_write!(usb_serial, "usb1 interrupt counter {} \r\n", counter);
+                log::info!("LOG !!! usb1 interrupt counter {}", counter);
                 if counter >= 1_000_000 {
                     ctx.shared.usb_interrupt_counter.lock(|ctr| *ctr = 0);
                 }

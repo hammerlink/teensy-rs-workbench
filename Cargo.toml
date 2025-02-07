@@ -9,7 +9,7 @@ rtic-monotonics = { version = "1", default-features = false, features = ["cortex
 
 teensy4-panic = { version = "0.2", features = ["log"] }
 usbd-audio = { version = "0.2" }
-usb-device = { version = "0.3.2", features = ["control-buffer-256"] }
+usb-device = { version = "0.3.2", features = ["control-buffer-256", "log"] }
 micromath = "2.1.0"
 libm = "0.2.11"
 imxrt-hal = { path= "/home/hendrik/Programs/rust_embedded/imxrt-hal-clean/", features = ["imxrt1060"] }
