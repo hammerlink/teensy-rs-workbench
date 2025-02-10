@@ -28,6 +28,13 @@ mod app {
     use usbd_audio::{AudioClass, AudioClassBuilder, Format, StreamConfig, TerminalType};
     use usbd_serial::SerialPort;
 
+    const SINETAB: [i16; 48] = [
+        0i16, 4276, 8480, 12539, 16383, 19947, 23169, 25995, 28377, 30272, 31650, 32486, 32767,
+        32486, 31650, 30272, 28377, 25995, 23169, 19947, 16383, 12539, 8480, 4276, 0, -4276, -8480,
+        -12539, -16383, -19947, -23169, -25995, -28377, -30272, -31650, -32486, -32767, -32486,
+        -31650, -30272, -28377, -25995, -23169, -19947, -16383, -12539, -8480, -4276,
+    ];
+
     /// Change me if you want to play with a full-speed USB device.
     const SPEED: Speed = Speed::High;
     /// Matches whatever is in imxrt-log.
@@ -48,7 +55,11 @@ mod app {
     /// of endpoints; we're not using all the endpoints in this example.
     static EP_STATE: EndpointState = EndpointState::max_endpoints();
 
-    const TIMER_MICRO_SECONDS: u32 = 1_000;
+    const TIMER_MICRO_SECONDS: u32 = 125;
+    const TIMER_HEALTH_SECONDS: u32 = 15;
+    const TIMER_HEALTH_INTERVAL: usize =
+        TIMER_HEALTH_SECONDS as usize * 1_000_000 / TIMER_MICRO_SECONDS as usize;
+    const VOLUME_TIMER_INTERVAL: usize = 125 / TIMER_MICRO_SECONDS as usize;
 
     type Bus = BusAdapter;
 
@@ -57,6 +68,7 @@ mod app {
         device: UsbDevice<'static, Bus>,
         led: board::Led,
         timer: hal::pit::Pit<0>,
+        sine_data: [u8; 96],
     }
 
     #[shared]
@@ -65,6 +77,9 @@ mod app {
         usb_serial: SerialPort<'static, Bus>,
         usb_audio: AudioClass<'static, Bus>,
         usb_interrupt_counter: usize,
+        usb_requests: [Option<usb_device::control::Request>; 30],
+        usb_requests_index: usize,
+        usb_audio_on: bool,
     }
 
     #[init(local = [bus: Option<UsbBusAllocator<Bus>> = None])]
@@ -123,15 +138,6 @@ mod app {
                 StreamConfig::new_discrete(Format::S16le, 1, &[48_000], TerminalType::InMicrophone)
                     .unwrap(),
             )
-            .output(
-                StreamConfig::new_discrete(
-                    Format::S24le,
-                    2,
-                    &[44_100, 48_000],
-                    TerminalType::OutSpeaker,
-                )
-                .unwrap(),
-            )
             .build(bus)
             .unwrap();
 
@@ -144,6 +150,12 @@ mod app {
             .device_sub_class(0x00)
             .device_protocol(0x00)
             .build();
+        // Properly convert i16 samples to bytes (little-endian)
+        let mut sine_data = [0u8; 96];
+        for (i, &sample) in SINETAB.iter().enumerate() {
+            sine_data[i * 2] = (sample & 0xFF) as u8;
+            sine_data[i * 2 + 1] = ((sample >> 8) & 0xFF) as u8;
+        }
 
         (
             Shared {
@@ -151,28 +163,72 @@ mod app {
                 usb_serial: class,
                 usb_audio: audio_class,
                 usb_interrupt_counter: 0,
+                usb_requests: [None; 30],
+                usb_requests_index: 0,
+                usb_audio_on: false,
             },
-            Local { device, led, timer },
+            Local {
+                device,
+                led,
+                timer,
+                sine_data,
+            },
         )
     }
 
     /// Occasionally try to poll the logger.
-    #[task(binds = PIT, local = [timer, ctr: usize = 0], shared = [configured, usb_serial], priority = 1)]
+    #[task(binds = PIT, local = [timer, sine_data, ctr: usize = 0, local_conf: bool = false, audio_write_ctr: usize = 0], shared = [configured, usb_serial, usb_requests, usb_requests_index, usb_audio_on, usb_audio], priority = 2)]
     fn pit_interrupt(mut ctx: pit_interrupt::Context) {
         while ctx.local.timer.is_elapsed() {
             ctx.local.timer.clear_elapsed();
         }
         *ctx.local.ctr += 1;
 
+        let is_audio_on = ctx.shared.usb_audio_on.lock(|x| *x);
+        if is_audio_on {
+            if *ctx.local.ctr % VOLUME_TIMER_INTERVAL == 0 {
+                ctx.shared
+                    .usb_audio
+                    .lock(|audio| audio.write(ctx.local.sine_data));
+
+                *ctx.local.audio_write_ctr += 1;
+                if *ctx.local.audio_write_ctr % 1000 == 0 {
+                    log::info!("audio write ctr {}", ctx.local.audio_write_ctr);
+                    *ctx.local.audio_write_ctr = 0;
+                }
+                return;
+            }
+        }
+
         // triggers every second
-        if *ctx.local.ctr % 30_000 == 0 {
+        if *ctx.local.local_conf {
+            ctx.shared.usb_requests_index.lock(|x| {
+                if *x <= 0usize {
+                    return;
+                }
+                ctx.shared.usb_requests.lock(|requests| {
+                    let request = requests[*x - 1];
+                    log::info!("request {:?}", request);
+                    requests[*x - 1] = None;
+                });
+                if *x > 0 {
+                    *x -= 1;
+                }
+            });
+        }
+
+        if *ctx.local.ctr % TIMER_HEALTH_INTERVAL == 0 {
+            // delay the startup logs
+            if *ctx.local.ctr >= TIMER_HEALTH_INTERVAL {
+                *ctx.local.local_conf = true;
+            }
             log::info!("pit timer ctr {}", ctx.local.ctr);
             if *ctx.local.ctr >= 10_000usize {
                 *ctx.local.ctr = 0usize;
             }
         }
         let is_configured = ctx.shared.configured.lock(|configured| *configured);
-        if is_configured {
+        if is_configured && *ctx.local.local_conf {
             unsafe {
                 if let Some(log_buffer) = LOG_SERIAL_BUFFER.as_mut() {
                     if log_buffer.has_data() {
@@ -198,7 +254,7 @@ mod app {
         }
     }
 
-    #[task(binds = USB_OTG1, local = [device, led, configured: bool = false], shared = [configured, usb_serial, usb_audio, usb_interrupt_counter], priority = 2)]
+    #[task(binds = USB_OTG1, local = [device, led, configured: bool = false], shared = [configured, usb_serial, usb_audio, usb_interrupt_counter, usb_requests, usb_requests_index, usb_audio_on], priority = 1)]
     fn usb1(mut ctx: usb1::Context) {
         let usb1::LocalResources {
             device,
@@ -212,14 +268,17 @@ mod app {
         });
 
         ctx.shared.usb_serial.lock(|usb_serial| {
-            if counter % 5 == 0 {
+            if counter % 10 == 0 {
                 log::info!("usb1 interrupt counter {}", counter);
                 if counter >= 500_000 {
                     ctx.shared.usb_interrupt_counter.lock(|ctr| *ctr = 0);
                 }
             }
+            // i assume request_result request code 11 with value 1 is start of signal
             ctx.shared.usb_audio.lock(|usb_audio| {
-                if device.poll(&mut [usb_serial, usb_audio]) {
+                let (has_data, poll_result, request_result) =
+                    device.poll_specific(&mut [usb_serial, usb_audio]);
+                if has_data {
                     if device.state() == UsbDeviceState::Configured {
                         if !*configured {
                             device.bus().configure();
@@ -237,6 +296,20 @@ mod app {
                         Err(usb_device::UsbError::WouldBlock) => {}
                         Err(err) => log::error!("{:?}", err),
                     }
+                }
+                if let Some(request) = request_result {
+                    if *configured && request.request == 11u8 {
+                        let value = request.value;
+                        let is_on = value == 1u16;
+                        ctx.shared.usb_audio_on.lock(|x| *x = is_on);
+                        log::info!("audio on: {}", is_on);
+                    }
+                    ctx.shared.usb_requests.lock(|requests| {
+                        ctx.shared.usb_requests_index.lock(|x| {
+                            requests[*x] = Some(request);
+                            *x += 1;
+                        });
+                    });
                 }
             });
         });
